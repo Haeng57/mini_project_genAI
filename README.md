@@ -18,12 +18,13 @@ AI 윤리성 리스크 진단 멀티에이전트 설계 시나리오
 
 ## Tech Stack 
 
-| Category   | Details                      |
-|------------|------------------------------|
-| Framework  | LangGraph, LangChain, Python |
-| LLM        | GPT-4o-mini via OpenAI API   |
-| Retrieval  | Chroma                       |
-
+| Category   | Details                                                |
+|------------|--------------------------------------------------------|
+| Framework  | LangGraph, LangChain, Python                           |
+| LLM        | GPT-4o-mini via OpenAI API                             |
+| Vector DB  | ChromaDB                                               |
+| Embedding	 | HuggingFace (nlpai-lab/KURE-v1)                        |
+| Data	     | Playwright, PDF OCR(PyMuPDFLoader), Web Search(Tavily) |
 
 ## Agents
 | 에이전트명                | 주요 역할 및 설명                                                                               |
