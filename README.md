@@ -4,10 +4,9 @@
 ## Overview
 - Objective : 특정 AI 서비스(최대 3개)에 대해 국제적 윤리 가이드라인을 기반한 윤리 리스크 진단·개선 자동화  
 - Ethics Guidelines Priority:  
-  1) EU AI Act  
-  2) UNESCO AI Ethics Recommendations  
-  3) OECD AI Principles  
-  4) 기타(ISO, 국내 자율점검표)  
+  1) UNESCO AI Ethics Recommendations  
+  2) OECD AI Principles  
+
 - Methods : 멀티에이전트 협력 평가, 자율점검표 기반 리스크 분석, 보고서 자동 생성  
 - Tools : LangGraph, LangChain, Python, GPT-4o-mini(OpenAI API), Chroma  
 
@@ -30,16 +29,23 @@
 ## Agents
 | 에이전트명                | 주요 역할 및 설명                                                                               |
 |---------------------------|-------------------------------------------------------------------------------------------------|
+| 가이드라인 임베딩 에이전트 | 국제적 윤리 가이드라인(UNESCO, OECD) 문서 임베딩 상태 확인 및 필요시 자동 임베딩 수행           |
 | 서비스 분석 에이전트       | AI 서비스 개요, 대상 기능, 주요 특징 등 정리 및 진단 범위 확정                                 |
 | 범위 검증 에이전트         | 서비스 분석 에이전트가 확정한 진단 범위를 사전 임베딩된 데이터와 대조하여 관련 정보 검증·수정  |
 | 윤리 리스크 진단 에이전트  | 편향성, 개인정보, 설명가능성 등 윤리 기준별 리스크 평가                                        |
 | 개선안 제안 에이전트       | 리스크 완화 및 윤리성 강화 위한 구체적 개선 방향 도출                                          |
 | 리포트 작성 에이전트       | 진단 결과 및 권고사항 요약 보고서 자동 생성                                                    |
 
+### 가이드라인 임베딩 에이전트
+| 노드명               | 입력(State 필드)                    | 출력(State 필드)                       | 상세 프롬프트 예시                                                                                                                            |
+|----------------------|-------------------------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| EmbeddingChecker     | -                                   | `embedded_files`, `need_embedding`     | 시스템: 당신은 문서 임베딩 전문가입니다.<br>벡터 데이터베이스에서 국제적 윤리 가이드라인 문서(UNESCO, OECD)의 임베딩 상태를 확인하고, 임베딩이 필요한 파일 목록을 반환하세요. |
+| GuidelineEmbedder    | `need_embedding`                    | `embedded_files`, `embedding_status`   | 시스템: 당신은 문서 임베딩 전문가입니다.<br>지정된 윤리 가이드라인 문서(`{files}`)를 임베딩하고, 각 파일의 임베딩 상태를 보고하세요. |
+
 ### 윤리 리스크 진단 에이전트
 | 노드명               | 입력(State 필드)                                       | 출력(State 필드)                         | 상세 프롬프트 예시                                                                                                                                                                                                                                                   |
 |----------------------|--------------------------------------------------------|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| GuidelineRetriever   | `ETHICS_GUIDELINE.doc_id`                             | `guideline_summary`                      | 시스템: 당신은 AI 윤리 가이드라인 전문가입니다.<br>입력된 문서 ID(`{doc_id}`)에 해당하는 가이드라인에서 **편향성**, **프라이버시**, **투명성** 관련 조항을 우선순위(EU AI Act > UNESCO > OECD > 기타)에 따라 요약하되, 조항 번호와 제목을 포함해 표로 작성하세요.      |
+| GuidelineRetriever   | `ETHICS_GUIDELINE.doc_id`                             | `guideline_summary`                      | 시스템: 당신은 AI 윤리 가이드라인 전문가입니다.<br>입력된 문서 ID(`{doc_id}`)에 해당하는 가이드라인에서 **편향성**, **프라이버시**, **투명성** 관련 조항을 우선순위(UNESCO > OECD > 기타)에 따라 요약하되, 조항 번호와 제목을 포함해 표로 작성하세요.      |
 | RiskItemExtractor    | `SERVICE_INFO.summary`, `SCOPE_UPDATE`                | `risk_items` (list)                      | 시스템: 당신은 AI 서비스 윤리 평가 전문가입니다.<br>서비스 요약과 검증된 범위 정보를 바탕으로 **편향성**, **프라이버시**, **설명가능성** 등 주요 윤리 항목별로 잠재 리스크 항목을 **5~7개**씩 추출하고, 간단한 설명을 덧붙여 리스트 형태로 출력하세요.            |
 | ScorePredictor       | `risk_item`, `guideline_summary`                      | `P, S, D, M, rationale`                  | 시스템: 다음 항목 `'{item}'`의 윤리 리스크를 평가하세요.<br>1) 발생 가능성(P), 2) 심각도(S), 3) 탐지 용이성(D), 4) 완화 난이도(M)을 각각 **1~5점**으로 산정하고, 각 점수에 대한 근거를 **2문장 이내**로 설명하세요.<br>적용 가이드라인 요약은 다음과 같습니다:<br>`{guideline_summary}` |
 | ScoreCalculator      | `P, S, D, M`                                           | `risk_scores.basic`, `risk_scores.weighted` | 시스템: 입력된 점수 P=`{P}`, S=`{S}`, D=`{D}`, M=`{M}`에 대해<br>1) 기본(basic): `basic = P × S`<br>2) 가중합(weighted): `weighted = 0.4×P + 0.4×S + 0.1×D + 0.1×M`<br>두 결과를 모두 반환하세요. |
@@ -47,7 +53,11 @@
 | LoopController       | `severity_levels`, `retry_count`              | `next_node`, `retry_count`               | 시스템: 1) 현재 `retry_count` < 3이고 `'높음'` 또는 `'심각'` 등급이 있으면 `next_node="ScorePredictor"`, `retry_count++`.<br>2) `retry_count` ≥ 3이거나 모든 항목 `'중간'` 이하일 경우 `next_node="ImprovementAgent"`로 이동하세요.<br>현재 등급 리스트: `{severity_list}`, 재진단 시도: `{retry_count}`회 |
 
 ## State
-- SERVICE_INFO: 진단 대상 AI 서비스 개요 및 주요 기능 정보  
+- GUIDELINE_EMBEDDING: 윤리 가이드라인 임베딩 상태 정보
+  - embedded_files: 임베딩 완료된 가이드라인 파일 목록
+  - embedding_status: 임베딩 상태 ('completed', 'failed', 'skipped')
+  - timestamp: 최근 임베딩 수행 시간
+- SERVICE_INFO: 진단 대상 AI 서비스 개요 및 주요 기능 정보 
   - doc_id: 서비스 개요 문서 고유 식별자  
   - chunk_ids: 분할 청크 ID 목록  
   - summary: 서비스 개요 요약문  
@@ -72,9 +82,11 @@
   - doc_id: 최종 보고서 원문 ID  
   - outline: 보고서 목차 메타데이터
 
+
 ## Architecture
 ```mermaid
 flowchart TD
+    G[가이드라인 임베딩 에이전트] --> A[서비스 분석 에이전트]
     A[서비스 분석 에이전트] --> B[범위 검증 에이전트]
     B --> C[윤리 리스크 진단 에이전트]
     C --> D[개선안 제안 에이전트]

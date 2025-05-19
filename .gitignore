@@ -3,3 +3,6 @@ data/유럽연합 인공지능법(번역본).pdf
 
 # env 파일 제외
 .env
+
+# vector_store 제외
+vector_store/

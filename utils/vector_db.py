@@ -10,6 +10,7 @@ from datetime import datetime
 from langchain.schema import Document
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
+from langchain.embeddings.base import Embeddings
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -34,6 +35,7 @@ class VectorDBManager:
         self,
         persist_directory: str = "./vector_store",
         openai_api_key: Optional[str] = None,
+        embedding_function: Optional[Embeddings] = None,
     ):
         """
         VectorDB 매니저 초기화
@@ -41,6 +43,7 @@ class VectorDBManager:
         Args:
             persist_directory: ChromaDB 데이터 저장 경로
             openai_api_key: OpenAI API 키
+            embedding_function: 사용자 지정 임베딩 함수 (선택사항)
         """
         # 이미 초기화된 경우 건너뜀 (싱글톤 패턴)
         if hasattr(self, '_initialized') and self._initialized:
@@ -53,8 +56,8 @@ class VectorDBManager:
         # 저장 디렉토리 생성
         os.makedirs(self.persist_directory, exist_ok=True)
         
-        # 임베딩 함수 초기화
-        self.embedding_function = OpenAIEmbeddings(
+        # 임베딩 함수 초기화 (사용자 지정 또는 기본값)
+        self.embedding_function = embedding_function or OpenAIEmbeddings(
             openai_api_key=self.openai_api_key
         )
         

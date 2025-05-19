@@ -1,273 +1,153 @@
-"""
-서비스 분석 에이전트 - AI 서비스의 개요와 주요 기능을 분석하고 진단 범위를 확정
-"""
-
-import os
-import sys
-import json
-from typing import Dict, Any, Optional
-from datetime import datetime
-from uuid import uuid4
-from dotenv import load_dotenv
-
-# 프로젝트 루트 디렉토리를 Python 경로에 추가
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# .env 파일 로드
-load_dotenv()
-
-from langchain_openai import ChatOpenAI
-from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.prompts import PromptTemplate
-from langgraph.graph import StateGraph, END
-
-# 프롬프트 템플릿 가져오기
-from prompts.service_info_prompts import SERVICE_ANALYSIS_TEMPLATE
-
-# VectorDB 매니저 가져오기
+from langchain_community.document_loaders import PyMuPDFLoader
 from utils.vector_db import VectorDBManager
+import os
+from typing import List
+import json
+from datetime import datetime
 
-class ServiceInfoAgent:
+def embed_pdf_documents(
+    collection_name: str = "ethics_guidelines", 
+    specific_files: List[str] = None,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50
+):
     """
-    AI 서비스 개요 분석 및 진단 범위 확정을 담당하는 에이전트
+    PDF 문서들을 임베딩하여 Vector DB에 저장
+    
+    Args:
+        collection_name: 저장할 컬렉션 이름
+        specific_files: 특정 파일들만 처리하고 싶을 경우 파일명 리스트
+        chunk_size: 청크 사이즈 (기본값 500자)
+        chunk_overlap: 청크 오버랩 (기본값 50자)
     """
+    # VectorDBManager 인스턴스 생성
+    db_manager = VectorDBManager()
     
-    def __init__(
-        self, 
-        model_name: str = "gpt-4o-mini", 
-        temperature: float = 0.2,
-        openai_api_key: Optional[str] = None,
-        tavily_api_key: Optional[str] = None
-    ):
-        """
-        서비스 분석 에이전트 초기화
-        
-        Args:
-            model_name: 사용할 OpenAI 모델명
-            temperature: 생성 다양성 파라미터 (0.0~1.0)
-            openai_api_key: OpenAI API 키
-            tavily_api_key: Tavily 검색 API 키
-        """
-        self.model_name = model_name
-        self.temperature = temperature
-        
-        # API 키 설정 (.env에서 자동 로드)
-        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
-        self.tavily_api_key = tavily_api_key or os.environ.get("TAVILY_API_KEY")
-        
-        # LLM 초기화
-        self.llm = ChatOpenAI(
-            model_name=self.model_name,
-            temperature=self.temperature,
-            openai_api_key=self.openai_api_key
-        )
-        
-        # 검색 도구 초기화
-        self.search = TavilySearchAPIWrapper()
-        
-        # 텍스트 분할기 초기화
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=3000,
-            chunk_overlap=300
-        )
-        
-        # VectorDB 매니저 초기화
-        self.vector_db = VectorDBManager(openai_api_key=self.openai_api_key)
-        
-        self.initialize_graph()
+    # data 디렉토리의 모든 PDF 파일 로드
+    data_dir = "./data"
     
-    def initialize_graph(self):
-        """LangGraph 워크플로우 초기화"""
-        # 노드 함수들 정의
-        def search_service_info(state: Dict[str, Any]) -> Dict[str, Any]:
-            """서비스에 관한 정보 검색"""
-            service_name = state["service_name"]
+    if specific_files:
+        pdf_files = specific_files
+    else:
+        pdf_files = [f for f in os.listdir(data_dir) if f.endswith('.pdf')]
+    
+    guideline_metadata = {}
+    
+    # 각 PDF 처리
+    for pdf_file in pdf_files:
+        pdf_path = os.path.join(data_dir, pdf_file)
+        print(f"처리 중: {pdf_file}")
+        
+        try:
+            # PyMuPDFLoader를 사용해 PDF 로드
+            loader = PyMuPDFLoader(pdf_path)
+            documents = loader.load()
             
-            # Tavily API로 서비스 정보 검색
-            search_results = self.search.results(
-                f"{service_name} AI service overview features ethical considerations",
-                max_results=5
-            )
-            
-            # 검색 결과 텍스트 추출
-            search_texts = []
-            for result in search_results:
-                if "content" in result:
-                    search_texts.append(result["content"])
-            
-            combined_text = "\n\n".join(search_texts)
-            
-            # 대용량 텍스트일 경우 청크로 분할
-            chunks = self.text_splitter.split_text(combined_text)
-            
-            return {
-                **state,
-                "search_results": search_results,
-                "search_chunks": chunks
+            # 문서 정보 메타데이터 생성
+            doc_metadata = {
+                "source_type": "pdf",
+                "file_name": pdf_file,
+                "file_path": pdf_path,
+                "type": "guideline",
+                "timestamp": datetime.now().isoformat(),
+                "total_pages": len(documents)
             }
-        
-        def analyze_service(state: Dict[str, Any]) -> Dict[str, Any]:
-            """수집된 정보를 기반으로 서비스 분석"""
-            service_name = state["service_name"]
-            chunks = state["search_chunks"]
             
-            # 청크 내용 결합
-            context = "\n\n".join(chunks[:3]) if len(chunks) > 3 else "\n\n".join(chunks)
+            # 문서 특성에 따른 추가 메타데이터 설정
+            if "UNESCO" in pdf_file or "유네스코" in pdf_file:
+                doc_metadata["priority"] = 1
+                doc_metadata["organization"] = "UNESCO"
+            elif "OECD" in pdf_file:
+                doc_metadata["priority"] = 2
+                doc_metadata["organization"] = "OECD"
+            else:
+                doc_metadata["priority"] = 3
+                doc_metadata["organization"] = "기타"
             
-            # 서비스 분석 프롬프트
-            service_analysis_prompt = PromptTemplate(
-                template=SERVICE_ANALYSIS_TEMPLATE,
-                input_variables=["service_name", "context"]
-            )
+            # 전체 문서 내용 저장 (State에서 참조할 수 있도록)
+            full_content = "\n\n".join([doc.page_content for doc in documents])
+            doc_id = db_manager.add_document(
+                collection_name=collection_name,
+                content=full_content,
+                metadata=doc_metadata
+            )[0]  # 첫 번째 ID 반환
             
-            # LangChain을 통한 프롬프트 전송 및 결과 획득
-            prompt = service_analysis_prompt.format(service_name=service_name, context=context)
-            raw_response = self.llm.invoke(prompt)
-            
-            # JSON 추출을 위한 정규식 패턴
-            import re
-            json_pattern = r'```json\s*([\s\S]*?)\s*```'
-            json_match = re.search(json_pattern, raw_response.content)
-            
-            # JSON 추출 실패 시 오류 처리
-            if not json_match:
-                error_msg = f"서비스 정보를 JSON 형식으로 추출하지 못했습니다: {service_name}"
-                print(f"오류: {error_msg}")
-                raise ValueError(error_msg)
-            
-            # JSON 파싱 시도
-            json_str = json_match.group(1)
-            try:
-                analysis_result = json.loads(json_str)
+            # 각 페이지를 VectorDB에 추가 (청크 단위로)
+            chunk_ids = []
+            for i, doc in enumerate(documents):
+                # 메타데이터 업데이트
+                page_metadata = doc_metadata.copy()
+                page_metadata.update({
+                    "page_number": i + 1,
+                    "doc_id": doc_id,
+                    "content_type": "page"
+                })
                 
-                # 필수 필드 검증
-                required_fields = ["service_name", "company", "service_summary", "diagnosis_scope"]
-                missing_fields = [field for field in required_fields if field not in analysis_result]
-                
-                if missing_fields:
-                    error_msg = f"분석 결과에 필수 필드가 누락되었습니다: {', '.join(missing_fields)}"
-                    print(f"오류: {error_msg}")
-                    raise ValueError(error_msg)
+                # 페이지 내용이 테이블인지 확인하는 휴리스틱
+                if contain_table(doc.page_content):
+                    page_metadata["has_table"] = True
                     
-            except json.JSONDecodeError as e:
-                error_msg = f"JSON 파싱 오류: {str(e)}"
-                print(f"오류: {error_msg}")
-                raise ValueError(error_msg)
-            
-            # 고유 문서 ID 생성
-            doc_id = f"service_info_{uuid4()}"
-            
-            return {
-                **state,
-                "analysis_result": analysis_result,
-                "doc_id": doc_id
-            }
+                # 각 페이지를 VectorDB에 추가
+                page_id = db_manager.add_document(
+                    collection_name=collection_name,
+                    content=doc.page_content,
+                    metadata=page_metadata
+                )[0]
                 
-        def store_to_db(state: Dict[str, Any]) -> Dict[str, Any]:
-            """분석 결과를 VectorDB에 저장"""
-            try:
-                analysis_result = state["analysis_result"]
-                
-                # 메타데이터 준비 (get 메서드로 안전하게 접근)
-                metadata = {
-                    "doc_id": state["doc_id"],
-                    "service_name": analysis_result.get("service_name", "알 수 없는 서비스"),
-                    "company": analysis_result.get("company", "알 수 없는 회사"),
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-                # VectorDB 매니저를 통해 문서 저장
-                ids = self.vector_db.add_document(
-                    collection_name="service_info",
-                    content=analysis_result,
-                    metadata=metadata
-                )
-                
-                return {
-                    **state,
-                    "storage_status": "success",
-                    "chunk_ids": ids
-                }
-                
-            except Exception as e:
-                print(f"VectorDB 저장 오류: {e}")
-                return {
-                    **state,
-                    "storage_status": "failed",
-                    "storage_error": str(e)
-                }
+                chunk_ids.append(page_id)
             
-        def prepare_output_state(state: Dict[str, Any]) -> Dict[str, Any]:
-            """최종 State 구조 생성"""
-            analysis_result = state["analysis_result"]
-            
-            # chunk_ids 가져오기 (저장 성공 시)
-            chunk_ids = state.get("chunk_ids", [])
-            
-            # 진단 대상 서비스에 대한 정보 담기
-            service_info = {
-                "doc_id": state["doc_id"],
-                "chunk_ids": chunk_ids,  # 저장된 청크 ID 추가
-                "summary": analysis_result.get("service_summary", "요약 정보가 제공되지 않았습니다."),
-                "service_name": analysis_result.get("service_name", "알 수 없는 서비스"),
-                "company": analysis_result.get("company", "알 수 없는 회사"),
-                "main_features": analysis_result.get("main_features", []),
-                "diagnosis_scope": analysis_result.get("diagnosis_scope", [])
+            # 가이드라인 메타데이터 정보 저장
+            guideline_metadata[doc_id] = {
+                "file_name": pdf_file,
+                "chunk_ids": chunk_ids,
+                "organization": doc_metadata["organization"],
+                "priority": doc_metadata["priority"],
             }
             
-            return {
-                "SERVICE_INFO": service_info
-            }
-
-        # 워크플로우 그래프 구성
-        workflow = StateGraph(input=Dict, output=Dict)
-        
-        # 노드 추가
-        workflow.add_node("search_service_info", search_service_info)
-        workflow.add_node("analyze_service", analyze_service)
-        workflow.add_node("store_to_db", store_to_db)
-        workflow.add_node("prepare_output", prepare_output_state)
-        
-        # 시작점 추가
-        workflow.set_entry_point("search_service_info")
-        
-        # 엣지 추가
-        workflow.add_edge("search_service_info", "analyze_service")
-        workflow.add_edge("analyze_service", "store_to_db")
-        workflow.add_edge("store_to_db", "prepare_output")
-        workflow.add_edge("prepare_output", END)
-        
-        # 컴파일
-        self.graph = workflow.compile()
-
-    def analyze(self, service_name: str) -> Dict[str, Any]:
-        """
-        AI 서비스 분석 및 진단 범위 확정 실행
-        
-        Args:
-            service_name: 분석할 AI 서비스명
+            print(f"성공: {pdf_file} ({len(documents)} 페이지)")
             
-        Returns:
-            Dict[str, Any]: SERVICE_INFO 상태 객체
-        """
-        # 초기 상태 설정
-        initial_state = {
-            "service_name": service_name
-        }
-        
-        # 그래프 실행
-        result = self.graph.invoke(initial_state)
-        
-        return result
+        except Exception as e:
+            print(f"오류 발생: {pdf_file} - {str(e)}")
+    
+    # 가이드라인 메타데이터 정보를 outputs에 저장
+    os.makedirs("./outputs", exist_ok=True)
+    with open("./outputs/guideline_metadata.json", "w", encoding="utf-8") as f:
+        json.dump(guideline_metadata, f, ensure_ascii=False, indent=2)
+    
+    print("모든 PDF 문서의 임베딩이 완료되었습니다.")
+    return guideline_metadata
 
-# 사용 예시
+def contain_table(text: str) -> bool:
+    """
+    텍스트 내용이 테이블을 포함하는지 휴리스틱하게 확인
+    
+    Args:
+        text: 확인할 텍스트 내용
+    
+    Returns:
+        bool: 테이블 포함 여부
+    """
+    # 테이블 특징 파악을 위한 휴리스틱 기준
+    table_indicators = [
+        # 행과 열 구분자가 일정 개수 이상 반복되는지
+        text.count('|') > 5,
+        text.count('\t') > 5,
+        # 괄호나 대시 기호 등 테이블의 구분자 패턴
+        '-----' in text or '=====' in text,
+        # 여러 줄에 걸쳐 구분자가 반복되는 패턴
+        text.count('\n') > 3 and (
+            sum(line.count('|') > 2 for line in text.split('\n')) > 3
+        )
+    ]
+    
+    # 하나라도 True이면 테이블로 간주
+    return any(table_indicators)
+
 if __name__ == "__main__":
-    # 환경변수에서 API 키를 가져오거나 직접 입력
-    agent = ServiceInfoAgent()
+    # 특정 파일들만 처리하고 싶을 경우
+    specific_files = [
+        "[UNESCO] AI 윤리에 관한 권고.pdf",
+        "인공지능 활용 원칙.pdf"
+    ]
     
-    # Microsoft Azure AI Vision Face API 분석
-    result = agent.analyze("Microsoft Azure AI Vision Face API")
-    
-    # 결과 출력
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    embed_pdf_documents(specific_files=specific_files)
