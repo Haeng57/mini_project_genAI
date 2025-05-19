@@ -1,2 +1,5 @@
 # AI Act 번역본 PDF 파일 제외
 data/유럽연합 인공지능법(번역본).pdf
+
+# env 파일 제외
+.env
