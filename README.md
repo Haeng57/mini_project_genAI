@@ -6,7 +6,7 @@ AI 윤리성 리스크 진단 멀티에이전트 설계 시나리오
 
 - Objective : 특정 AI 서비스(최대 3개)에 대해 국제적 윤리 가이드라인(EU AI Act, UNESCO, OECD 등)에 기반한 윤리 리스크 진단 및 개선 권고안 자동화
 - Methods : 멀티에이전트 협력 평가, 자율점검표 기반 리스크 분석, 보고서 자동 생성
-- Tools : LangGraph, LangChain, Python, GPT-4o-mini(OpenAI API), FAISS, Chroma
+- Tools : LangGraph, LangChain, Python, GPT-4o-mini(OpenAI API), Chroma
 
 ## Features
 
@@ -24,48 +24,66 @@ AI 윤리성 리스크 진단 멀티에이전트 설계 시나리오
 | LLM        | GPT-4o-mini via OpenAI API                             |
 | Vector DB  | ChromaDB                                               |
 | Embedding	 | HuggingFace (nlpai-lab/KURE-v1)                        |
-| Data	     | Playwright, PDF OCR(PyMuPDFLoader), Web Search(Tavily) |
+| Data	     | PDF OCR(PyMuPDFLoader), Web Search(Tavily)             |
 
 ## Agents
 | 에이전트명                | 주요 역할 및 설명                                                                               |
 |---------------------------|-------------------------------------------------------------------------------------------------|
 | 서비스 분석 에이전트       | AI 서비스 개요, 대상 기능, 주요 특징 등 정리 및 진단 범위 확정                                 |
-| 범위 검증 에이전트	     | E서비스 분석 에이전트가 확정한 진단 범위를 사전 임베딩된 데이터와 대조하여 관련 정보 검증·수정 |
+| 범위 검증 에이전트	     | 서비스 분석 에이전트가 확정한 진단 범위를 사전 임베딩된 데이터와 대조하여 관련 정보 검증·수정  |
 | 윤리 리스크 진단 에이전트  | 편향성, 개인정보, 설명가능성 등 윤리 기준별 리스크 평가                                        |
 | 개선안 제안 에이전트       | 리스크 완화 및 윤리성 강화 위한 구체적 개선 방향 도출                                          |
 | 리포트 작성 에이전트       | 진단 결과 및 권고사항 요약 보고서 자동 생성                                                    |
 
+### 윤리 리스크 진단 에이전트
+| 노드명               | 입력(State 필드)     | 출력(State 필드)    | 상세 프롬프트 예시                                                                                                                                                                                                                                                   |
+|----------------------|----------------------|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| GuidelineRetriever   | `ETHICS_GUIDELINE.doc_id`  | `guideline_summary` | 시스템: 당신은 AI 윤리 가이드라인 전문가입니다.<br>입력된 문서 ID(`{doc_id}`)에 해당하는 가이드라인에서 **편향성**, **프라이버시**, **투명성** 관련 조항을 요약하되, 조항 번호와 제목을 포함해 표로 작성하세요.                                                      |
+| RiskItemExtractor    | `SERVICE_INFO.summary`, `SCOPE_UPDATE` | `risk_items` (list) | 시스템: 당신은 AI 서비스 윤리 평가 전문가입니다.<br>서비스 요약과 검증된 범위 정보를 바탕으로 **편향성**, **프라이버시**, **설명가능성** 등 주요 윤리 항목별로 잠재 리스크 항목을 **5~7개**씩 추출하고, 간단한 설명을 덧붙여 리스트 형태로 출력하세요.            |
+| ScorePredictor       | `risk_item`, `guideline_summary`      | `P, S, D, M, rationale` | 시스템: 다음 항목 `'{item}'`의 윤리 리스크를 평가하세요.<br>1) 발생 가능성(P), 2) 심각도(S), 3) 탐지 용이성(D), 4) 완화 난이도(M)을 각각 **1~5점**으로 산정하고, 각 점수에 대한 근거를 **2문장 이내**로 설명하세요.<br>적용 가이드라인 요약은 다음과 같습니다:<br>`{guideline_summary}` |
+| ScoreCalculator      | `P, S, D, M`         | `risk_score`        | 시스템: 입력된 점수 P=`{P}`, S=`{S}`, D=`{D}`, M=`{M}`에 대해 아래 공식을 사용해 위험점수를 계산하세요.<br>1) 기본: `risk_score = P × S`<br>2) 가중합: `risk_score = 0.4×P + 0.4×S + 0.1×D + 0.1×M`<br>위 두 결과를 모두 제시하세요. |
+| SeverityClassifier   | `risk_score`         | `severity_level`    | 시스템: 위험점수 `{risk_score}`에 따라 다음 기준으로 등급을 결정하세요.`1~6: '낮음'` `7~12: '중간'` `13~18: '높음'` `19~25: '심각'` 결과를 <code>{"level": "등급", "thresholds": `[1~6,7~12,13~18,19~25]`}</code> 형식의 JSON으로 출력하세요. |
+| LoopController       | `severity_level` (list) | `next_node`       | 시스템: 진단 결과 중 **'높음'** 또는 **'심각'** 등급 항목이 하나라도 있으면 **ScorePredictor**로 재진단 루프, 그렇지 않으면 **ImprovementAgent**로 이동합니다.<br>현재 등급 리스트: `{severity_list}`.                      |
+
 
 ## State
-- SERVICE_INFO: 진단 대상 AI 서비스 개요 및 주요 기능 정보
-- SCOPE_UPDATE: 검증 에이전트가 수정·확인한 진단 범위 정보
-- ETHICS_GUIDELINE: 적용할 윤리 가이드라인(예: EU AI Act, OECD 등) 및 기준 목록
-- RISK_ASSESSMENT: 각 항목별 윤리 리스크 평가 결과 및 등급(편향, 프라이버시, 투명성 등)
-- IMPROVEMENT_SUGGESTION: 리스크별 개선 권고안 및 구체적 실행 방안
-- REPORT: 전체 진단 결과 및 요약, 권고사항을 포함한 최종 보고서
+- SERVICE_INFO: 진단 대상 AI 서비스 개요 및 주요 기능 정보  
+  - doc_id: 서비스 개요 문서 고유 식별자  
+  - chunk_ids: 분할 청크 ID 목록  
+  - summary: 서비스 개요 요약문  
 
+- SCOPE_UPDATE: 검증 에이전트가 수정·확인한 진단 범위 정보  
+  - doc_id: 진단 범위 검증 문서 ID  
+  - modifications: 수정·확인된 범위 항목 메타 정보  
 
-텍스트 저장 최적화: 모든 대용량 텍스트는 ChromaDB에 저장하고, State에는 해당 문서 참조 메타데이터만 기록
-(예시)
-- SERVICE_INFO
-    - doc_id: 서비스 개요 문서 고유 식별자
-    - chunk_ids: 분할 청크 ID 목록
-    - summary: 서비스 개요 요약문
-- SCOPE_UPDATE
-    - doc_id: 진단 범위 검증 문서 ID
-    - modifications: 수정·확인된 범위 항목 메타 정보
-- ETHICS_GUIDELINE
-    - doc_id: 가이드라인 원문 ID
-    - guideline_list: 적용 기준별 메타(조항 번호, 제목)
-- RISK_ASSESSMENT
-    - doc_id: 리스크 평가 원문 ID
-    - risk_items: 항목별(편향, 프라이버시 등) 리스크 등급 메타
-- IMPROVEMENT_SUGGESTION
-    - doc_id: 개선안 제안 원문 ID
-    - suggestions: 각 리스크별 개선 권고 메타 정보
-- REPORT
-    - doc_id: 최종 보고서 원문 ID
-    - outline: 보고서 목차 메타데이터
+- ETHICS_GUIDELINE: 적용할 윤리 가이드라인 및 기준 목록  
+  - doc_id: 가이드라인 원문 ID  
+  - guideline_list: 조항 번호, 제목 등 메타  
+
+- RISK_ASSESSMENT:
+  - doc_id: 리스크 평가 원문 ID
+  - risk_items:
+    - 항목별 리스크 리스트
+    - (예: 편향, 프라이버시, 설명가능성)
+  - scores:
+    - P: 발생 가능성 점수
+    - S: 심각도 점수
+    - D: 탐지 용이성 점수
+    - M: 완화 난이도 점수
+    - rationale: 각 점수 근거
+  - risk_scores:
+    - basic: P × S
+    - weighted: 0.4×P + 0.4×S + 0.1×D + 0.1×M
+  - severity_levels: `{"level": "중간", "thresholds": [1~6, 7~12, 13~18, 19~25]}`
+  - next_node: `"ScorePredictor"` 또는 `"ImprovementAgent"`
+
+- IMPROVEMENT_SUGGESTION: 리스크별 개선 권고안 및 구체적 실행 방안  
+  - doc_id: 개선안 제안 원문 ID  
+  - suggestions: 각 리스크별 개선 권고 메타 정보  
+
+- REPORT: 전체 진단 결과 및 요약, 권고사항을 포함한 최종 보고서  
+  - doc_id: 최종 보고서 원문 ID  
+  - outline: 보고서 목차 메타데이터  
 
 
 ## Architecture
