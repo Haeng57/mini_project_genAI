@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, Field
 from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -66,10 +66,11 @@ llm = ChatOpenAI(
 # ChromaDB 연결 설정
 def get_vector_store():
     """ChromaDB 벡터 스토어 연결"""
-    embedding_function = OpenAIEmbeddings()
+    embedding_function = HuggingFaceEmbeddings(model_name="nlpai-lab/KURE-v1")
     vector_store = Chroma(
         persist_directory="./vector_store",
-        embedding_function=embedding_function
+        embedding_function=embedding_function,
+        collection_name="ethics_guidelines"  # 콜렉션명 명시
     )
     return vector_store
 
@@ -99,8 +100,6 @@ def guideline_retriever(state: EthicalRiskState) -> EthicalRiskState:
             results = vector_store.similarity_search(
                 query=query,
                 k=5
-                # 필터 제거 또는 수정
-                # filter={"type": "guideline"}
             )
             
             # 검색 결과 처리
