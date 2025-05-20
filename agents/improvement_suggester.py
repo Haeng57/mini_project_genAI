@@ -1,7 +1,7 @@
 # filepath: /Users/lwh/SKALA/mini_project_genAI/agents/improvement_suggester.py
 import os
 import json
-from typing import Dict, List
+from typing import Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 

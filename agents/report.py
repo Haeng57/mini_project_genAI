@@ -1,12 +1,13 @@
 import os
 import sys
 import json
-import subprocess  # 추가
+import subprocess
 from typing import Dict, List, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 import markdown
 import tempfile
+from weasyprint import HTML
 
 # 상위 디렉토리를 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -96,6 +97,14 @@ def report_drafter(state: ReportState) -> ReportState:
     1. 리스크 영역별 주요 이슈 요약
     2. 가장 심각한 상위 3가지 리스크 하이라이트
     3. 리스크 수준별 분포 (높음, 중간, 낮음)
+    4. 각 윤리 차원별 평가 점수 및 근거
+       - 각 윤리 차원(공정성, 프라이버시, 투명성, 책임성, 안전성)의 평가 점수(1-5점)
+       - 평가 점수의 의미와 이를 부여한 근거
+    
+    항목 4는 다음과 같은 형식의 표로 표현하세요:
+    | 윤리 차원 | 평가 점수 | 의미 | 근거 |
+    |---------|---------|-----|-----|
+    | 공정성   | 4점     | 체계적 편향 평가와 일부 집단 간 성능 차이 모니터링 | (평가 근거) |
     
     출력은 마크다운 형식으로 작성하되, 표나 목록을 활용하여 가독성을 높여주세요.
     ```markdown
@@ -123,10 +132,16 @@ def report_drafter(state: ReportState) -> ReportState:
         {improvements_text}
         ```
         
+        ## 리스크 평가 결과
+        ```json
+        {risk_assessments_text}
+        ```
+        
         개선 권고사항 섹션에는 다음 내용을 포함하세요:
         1. 우선순위별 주요 개선 권고사항 요약
         2. 단기/중기/장기 개선 로드맵
         3. 이행 난이도와 기대 효과 비교
+        4. 각 개선안이 어떻게 윤리 점수를 향상시킬 수 있는지에 대한 설명
         
         출력은 마크다운 형식으로 작성하되, 표나 목록을 활용하여 가독성을 높여주세요.
         ```markdown
@@ -238,34 +253,60 @@ def report_finalizer(state: ReportState) -> ReportState:
         
         # PDF 파일 생성
         try:
-            # 새로운 PDF 생성 방식으로 변경
+            # weasyprint를 사용하여 PDF 생성
             pdf_filename = f"./outputs/reports/{report_basename}.pdf"
             
-            # pandoc 명령어 실행
-            try:
-                # subprocess를 사용하여 명령어 실행
-                cmd = [
-                    "pandoc",
-                    md_filename,
-                    "-o", pdf_filename,
-                    "--pdf-engine=/Library/TeX/texbin/pdflatex"
-                ]
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                
-                if os.path.exists(pdf_filename):
-                    print(f"✅ PDF 보고서 생성 완료: {pdf_filename}")
-                else:
-                    print("⚠️ PDF 파일이 생성되지 않았습니다.")
-                    
-            except subprocess.CalledProcessError as e:
-                print(f"⚠️ PDF 생성 중 오류 발생: {e.stderr}")
-                
-            except FileNotFoundError:
-                print("⚠️ pandoc 또는 pdflatex 명령이 설치되어 있지 않습니다.")
-                print("Mac에서는 'brew install pandoc', 'brew install basictex'로 설치할 수 있습니다.")
+            # 마크다운을 HTML로 변환
+            html_content = markdown.markdown(report_content, extensions=['tables', 'fenced_code'])
+            
+            # 스타일 추가 (가독성 개선)
+            styled_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body {{
+                        font-family: 'Apple SD Gothic Neo', 'Nanum Gothic', sans-serif;
+                        line-height: 1.6;
+                        margin: 2em;
+                    }}
+                    h1, h2, h3 {{
+                        color: #333;
+                    }}
+                    table {{
+                        border-collapse: collapse;
+                        width: 100%;
+                        margin: 1em 0;
+                    }}
+                    th, td {{
+                        border: 1px solid #ddd;
+                        padding: 8px;
+                        text-align: left;
+                    }}
+                    th {{
+                        background-color: #f2f2f2;
+                    }}
+                    code {{
+                        background-color: #f5f5f5;
+                        padding: 2px 4px;
+                        border-radius: 4px;
+                    }}
+                </style>
+            </head>
+            <body>
+            {html_content}
+            </body>
+            </html>
+            """
+            
+            # HTML을 PDF로 변환
+            HTML(string=styled_html).write_pdf(pdf_filename)
+            print(f"✅ PDF 보고서 생성 완료: {pdf_filename}")
 
         except Exception as e:
             print(f"⚠️ PDF 생성 중 오류 발생: {str(e)}")
+            print("💡 weasyprint 설치를 확인하세요: pip install weasyprint")
         
         return ReportState(
             service_info=state.service_info,
