@@ -1,13 +1,16 @@
 import os
 import sys
 import json
-import subprocess
 from typing import Dict, List, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
-import markdown
-import tempfile
-from weasyprint import HTML
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # 상위 디렉토리를 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -186,45 +189,13 @@ def report_finalizer(state: ReportState) -> ReportState:
             timestamp=datetime.now().isoformat()
         )
     
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
-    
-    # 각 섹션 텍스트 결합
-    sections_text = "\n\n".join([
-        state.report_sections.get("overview", "# 개요\n섹션 없음"),
-        state.report_sections.get("findings", "# 주요 발견사항\n섹션 없음"),
-        state.report_sections.get("recommendations", "# 개선 권고사항\n섹션 없음")
-    ])
-    
+    overview_content = state.report_sections.get("overview", "# 개요\n섹션 없음")
+    findings_content = state.report_sections.get("findings", "# 주요 발견사항\n섹션 없음")
+    recommendations_content = state.report_sections.get("recommendations", "# 개선 권고사항\n섹션 없음")
+
     service_name = state.service_info.get("title", "AI 서비스")
     
-    # 보고서 최종화
-    finalize_prompt = f"""
-    당신은 AI 윤리성 진단 전문가입니다. 다음 섹션들을 바탕으로 "{service_name}에 대한 AI 윤리성 진단 보고서"를 최종화해주세요.
-    
-    ## 보고서 섹션
-    {sections_text}
-    
-    다음 작업을 수행해주세요:
-    1. 모든 섹션을 일관된 형식과 톤으로 통합
-    2. 요약문(Executive Summary) 섹션 추가
-    3. 결론 섹션 추가
-    4. 적절한 표, 차트 위치 표시 (실제 차트는 생성하지 않고 [차트: 내용] 형식으로 표시)
-    
-    최종 보고서는 다음 구조를 따라야 합니다:
-    1. 제목
-    2. 요약문(Executive Summary)
-    3. 개요
-    4. 주요 발견사항
-    5. 개선 권고사항
-    6. 결론
-    
-    출력은 마크다운 형식으로 작성하되, 표나 목록을 활용하여 가독성을 높여주세요.
-    """
-    
     try:
-        response = llm.invoke(finalize_prompt)
-        report_content = response.content
-        
         # 보고서 메타데이터 생성
         report_metadata = {
             "title": f"{service_name} AI 윤리성 진단 보고서",
@@ -234,93 +205,90 @@ def report_finalizer(state: ReportState) -> ReportState:
             "improvement_count": len(state.improvement_suggestions if state.improvement_suggestions else [])
         }
         
+        # 최종 보고서 내용 (마크다운 형식)
+        final_report_md_content = f"""
+# {report_metadata['title']}
+
+## 요약문(Executive Summary)
+(LLM이 생성한 요약문 내용)
+
+{overview_content}
+
+{findings_content}
+
+{recommendations_content}
+
+## 결론
+(LLM이 생성한 결론 내용)
+"""
+        
         final_report = {
             "metadata": report_metadata,
-            "content": report_content
+            "content": final_report_md_content
         }
         
         # 출력 디렉토리 생성
-        os.makedirs("./outputs/reports", exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_basename = f"ethics_report_{timestamp}"
+        output_dir = "./outputs/reports"
+        os.makedirs(output_dir, exist_ok=True)
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_basename = f"ethics_report_{timestamp_str}"
         
         # 마크다운 파일 저장
-        md_filename = f"./outputs/reports/{report_basename}.md"
+        md_filename = os.path.join(output_dir, f"{report_basename}.md")
         with open(md_filename, "w", encoding="utf-8") as f:
-            f.write(report_content)
+            f.write(final_report_md_content)
             
         print(f"✅ 마크다운 보고서 생성 완료: {md_filename}")
         
-        # PDF 파일 생성
+        # PDF 파일 생성 (ReportLab 사용)
+        pdf_filename = os.path.join(output_dir, f"{report_basename}.pdf")
+        
         try:
-            # weasyprint를 사용하여 PDF 생성
-            pdf_filename = f"./outputs/reports/{report_basename}.pdf"
-            
-            # 마크다운을 HTML로 변환
-            html_content = markdown.markdown(report_content, extensions=['tables', 'fenced_code'])
-            
-            # 스타일 추가 (가독성 개선)
-            styled_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <style>
-                    body {{
-                        font-family: 'Apple SD Gothic Neo', 'Nanum Gothic', sans-serif;
-                        line-height: 1.6;
-                        margin: 2em;
-                    }}
-                    h1, h2, h3 {{
-                        color: #333;
-                    }}
-                    table {{
-                        border-collapse: collapse;
-                        width: 100%;
-                        margin: 1em 0;
-                    }}
-                    th, td {{
-                        border: 1px solid #ddd;
-                        padding: 8px;
-                        text-align: left;
-                    }}
-                    th {{
-                        background-color: #f2f2f2;
-                    }}
-                    code {{
-                        background-color: #f5f5f5;
-                        padding: 2px 4px;
-                        border-radius: 4px;
-                    }}
-                </style>
-            </head>
-            <body>
-            {html_content}
-            </body>
-            </html>
-            """
-            
-            # HTML을 PDF로 변환
-            HTML(string=styled_html).write_pdf(pdf_filename)
-            print(f"✅ PDF 보고서 생성 완료: {pdf_filename}")
-
+            pdfmetrics.registerFont(TTFont('AppleSDGothicNeo', '/System/Library/Fonts/AppleSDGothicNeo.ttc'))
+            font_name = 'AppleSDGothicNeo'
         except Exception as e:
-            print(f"⚠️ PDF 생성 중 오류 발생: {str(e)}")
-            print("💡 weasyprint 설치를 확인하세요: pip install weasyprint")
+            print(f"⚠️ Apple SD Gothic Neo 폰트 등록 실패: {e}. 기본 폰트를 사용합니다.")
+            font_name = 'Helvetica'
+
+        doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+        styles = getSampleStyleSheet()
         
-        return ReportState(
-            service_info=state.service_info,
-            risk_assessments=state.risk_assessments,
-            improvement_suggestions=state.improvement_suggestions,
-            report_sections=state.report_sections,
-            final_report=final_report,
-            report_status="completed",
-            timestamp=datetime.now().isoformat()
-        )
+        styles.add(ParagraphStyle(name='CustomTitle', fontName=font_name, fontSize=18, alignment=1, spaceAfter=20, leading=22))
+        styles.add(ParagraphStyle(name='CustomHeading1', fontName=font_name, fontSize=16, spaceAfter=15, leading=20, textColor=colors.HexColor("#333333")))
+        styles.add(ParagraphStyle(name='CustomNormal', fontName=font_name, fontSize=10, spaceAfter=10, leading=14))
+
+        story = []
+
+        story.append(Paragraph(report_metadata['title'], styles['CustomTitle']))
+        story.append(Spacer(1, 12))
+        story.append(Paragraph(f"작성일: {datetime.now().strftime('%Y년 %m월 %d일')}", styles['CustomNormal']))
+        story.append(Spacer(1, 24))
+
+        story.append(Paragraph("요약문 (Executive Summary)", styles['CustomHeading1']))
+        story.append(Paragraph("LLM으로부터 생성된 요약문 내용이 여기에 들어갑니다.", styles['CustomNormal']))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("개요", styles['CustomHeading1']))
+        story.append(Paragraph(overview_content.replace("# 개요", "").strip(), styles['CustomNormal']))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("주요 발견사항", styles['CustomHeading1']))
+        story.append(Paragraph(findings_content.replace("# 주요 발견사항", "").strip(), styles['CustomNormal']))
+        story.append(Spacer(1, 12))
         
+        story.append(Paragraph("개선 권고사항", styles['CustomHeading1']))
+        story.append(Paragraph(recommendations_content.replace("# 개선 권고사항", "").strip(), styles['CustomNormal']))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("결론", styles['CustomHeading1']))
+        story.append(Paragraph("LLM으로부터 생성된 결론 내용이 여기에 들어갑니다.", styles['CustomNormal']))
+        story.append(Spacer(1, 12))
+
+        doc.build(story)
+        print(f"✅ PDF 보고서 생성 완료: {pdf_filename}")
+
     except Exception as e:
-        error_message = f"최종 보고서 생성 중 오류 발생: {str(e)}"
-        print(f"❌ {error_message}")
+        print(f"⚠️ PDF 생성 중 오류 발생: {str(e)}")
         
         return ReportState(
             service_info=state.service_info,
@@ -328,9 +296,19 @@ def report_finalizer(state: ReportState) -> ReportState:
             improvement_suggestions=state.improvement_suggestions,
             report_sections=state.report_sections,
             report_status="failed",
-            error_message=error_message,
+            error_message=str(e),
             timestamp=datetime.now().isoformat()
         )
+    
+    return ReportState(
+        service_info=state.service_info,
+        risk_assessments=state.risk_assessments,
+        improvement_suggestions=state.improvement_suggestions,
+        report_sections=state.report_sections,
+        final_report=final_report,
+        report_status="completed",
+        timestamp=datetime.now().isoformat()
+    )
 
 # 그래프 구성
 def create_report_agent() -> StateGraph:
@@ -373,10 +351,8 @@ def run_report_agent(
     # 에이전트 실행
     result = app.invoke(initial_state.dict())
     
-    # 딕셔너리 접근 방식으로 수정
     print(f"리포트 작성 완료: 상태 = {result['report_status']}")
     
-    # 결과 반환 - 딕셔너리 접근 방식으로 수정
     return {
         "report_metadata": result.get("final_report", {}).get("metadata", {}),
         "report_content": result.get("final_report", {}).get("content", ""),

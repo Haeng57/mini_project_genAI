@@ -570,16 +570,53 @@ def risk_assessor(state: EthicalRiskState) -> EthicalRiskState:
             # 해당 차원의 가이드라인 추출
             category_guidelines = state.guideline_summary.get(category, [])
             
-            # 가이드라인 텍스트 생성 (없으면 기본값 사용)
+            # 가이드라인 텍스트 생성 (없으면 LLM으로 생성)
             if category_guidelines:
                 guidelines_text = "\n\n".join([
                     f"출처: {item['source']}\n내용: {item['content']}" 
                     for item in category_guidelines
                 ])
             else:
-                # 가이드라인이 없을 경우 기본 가이드라인 텍스트 제공
-                print(f"  ⚠️ {category} 가이드라인 없음, 기본값 사용")
-                guidelines_text = f"{category}에 관한 AI 윤리 가이드라인의 일반적 원칙을 적용하세요."
+                # 가이드라인이 없을 경우 LLM을 통해 생성
+                print(f"  ⚠️ {category} 가이드라인 없음, LLM으로 생성 중...")
+                
+                generate_prompt = f"""
+                당신은 AI 윤리 가이드라인 전문가입니다. {category} 측면에서 AI 서비스 평가를 위한 
+                국제 표준 수준의 윤리 가이드라인을 생성해주세요.
+                
+                다음을 포함해야 합니다:
+                1. {category}에 관한 핵심 원칙 3-5가지
+                2. {category}을 평가하기 위한 구체적인 기준
+                3. 국제 표준(예: UNESCO, OECD)에 부합하는 내용
+                
+                자세하고 실용적인 가이드라인을 제공해주세요.
+                """
+                
+                # LLM에 가이드라인 생성 요청
+                generate_messages = [
+                    SystemMessage(content="당신은 AI 윤리 국제 표준 가이드라인 전문가입니다."),
+                    HumanMessage(content=generate_prompt)
+                ]
+                
+                generated_response = llm.invoke(generate_messages)
+                
+                # 생성된 가이드라인 사용
+                guidelines_text = f"[LLM 생성 가이드라인] {category} 윤리 기준:\n\n{generated_response.content}"
+                
+                # 벡터 스토어에 생성된 가이드라인 저장
+                try:
+                    vector_store = get_vector_store()
+                    vector_store.add_texts(
+                        texts=[generated_response.content],
+                        metadatas=[{
+                            "type": "generated_guideline",
+                            "dimension": category,
+                            "timestamp": datetime.now().isoformat()
+                        }]
+                    )
+                    print(f"  ✓ 생성된 {category} 가이드라인 벡터 스토어에 저장 완료")
+                except Exception as e:
+                    print(f"  ⚠️ 생성된 가이드라인 저장 실패: {str(e)}")
             
             # LLM으로 리스크 평가
             assessment_prompt = f"""
