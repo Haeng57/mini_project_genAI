@@ -35,7 +35,7 @@ class EthicalRiskState(BaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     error_message: Optional[str] = None
     
-    # ChromaDB 연결 정보 (추가)
+    # ChromaDB 연결 정보
     risk_assessments: List[Dict[str, Any]] = Field(default_factory=list)
     
     def dict(self) -> Dict[str, Any]:

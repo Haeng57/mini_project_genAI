@@ -241,11 +241,16 @@ def report_finalizer(state: ReportState) -> ReportState:
             # 새로운 PDF 생성 방식으로 변경
             pdf_filename = f"./outputs/reports/{report_basename}.pdf"
             
-            # markdown-pdf 명령어 실행
+            # pandoc 명령어 실행
             try:
                 # subprocess를 사용하여 명령어 실행
-                command = ["markdown-pdf", md_filename, "-o", pdf_filename]
-                result = subprocess.run(command, check=True, capture_output=True, text=True)
+                cmd = [
+                    "pandoc",
+                    md_filename,
+                    "-o", pdf_filename,
+                    "--pdf-engine=/Library/TeX/texbin/pdflatex"
+                ]
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
                 
                 if os.path.exists(pdf_filename):
                     print(f"✅ PDF 보고서 생성 완료: {pdf_filename}")
@@ -253,12 +258,11 @@ def report_finalizer(state: ReportState) -> ReportState:
                     print("⚠️ PDF 파일이 생성되지 않았습니다.")
                     
             except subprocess.CalledProcessError as e:
-                print(f"⚠️ PDF 생성 중 오류 발생: {e}")
-                print(f"오류 출력: {e.stderr}")
+                print(f"⚠️ PDF 생성 중 오류 발생: {e.stderr}")
                 
             except FileNotFoundError:
-                print("⚠️ markdown-pdf 명령이 설치되어 있지 않습니다.")
-                print("npm install -g markdown-pdf 명령으로 설치해주세요.")
+                print("⚠️ pandoc 또는 pdflatex 명령이 설치되어 있지 않습니다.")
+                print("Mac에서는 'brew install pandoc', 'brew install basictex'로 설치할 수 있습니다.")
 
         except Exception as e:
             print(f"⚠️ PDF 생성 중 오류 발생: {str(e)}")
