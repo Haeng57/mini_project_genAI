@@ -29,7 +29,7 @@ def retrieve_best_practices(state: ImprovementSuggesterState) -> ImprovementSugg
     print("🔍 모범 사례 검색 중...")
     
     risk_assessment = state.risk_assessment
-    if not risk_assessment or "risk_items" not in risk_assessment:
+    if not risk_assessment:
         return ImprovementSuggesterState(
             service_info=state.service_info,
             risk_assessment=risk_assessment,
@@ -38,20 +38,60 @@ def retrieve_best_practices(state: ImprovementSuggesterState) -> ImprovementSugg
         )
     
     try:
+        # 리스크 평가 구조 확인 - risk_items 또는 risk_assessments 확인
+        risk_items = []
+        
+        # risk_assessment.py에서 반환한 risk_assessments 필드 확인
+        if "risk_assessments" in risk_assessment:
+            # risk_assessments 데이터로 작업
+            risk_assessments = risk_assessment.get("risk_assessments", [])
+            
+            # 각 카테고리의 리스크 항목 추출
+            for assessment in risk_assessments:
+                risks = assessment.get("risks", [])
+                dimension = assessment.get("dimension", "unknown")
+                for i, risk in enumerate(risks):
+                    risk_items.append({
+                        "item_id": f"{dimension}_{i}",
+                        "category": dimension,
+                        "risk_item": risk.get("title", ""),
+                        "level": risk.get("severity", "중간")
+                    })
+        
+        # 기존 구조도 확인
+        elif "risk_items" in risk_assessment:
+            risk_items = risk_assessment.get("risk_items", [])
+        
+        # severity_levels가 있으면 사용
+        elif "severity_levels" in risk_assessment:
+            risk_items = risk_assessment.get("severity_levels", [])
+        
+        # 리스크 항목이 없는 경우
+        if not risk_items:
+            return ImprovementSuggesterState(
+                service_info=state.service_info,
+                risk_assessment=risk_assessment,
+                error_message="식별된 리스크 항목이 없습니다",
+                timestamp=datetime.now().isoformat()
+            )
+        
         # 심각한 리스크 항목들 추출
-        severity_levels = risk_assessment.get("severity_levels", [])
-        high_risk_items = [item for item in severity_levels 
-                          if item.get("level") in ["높음", "심각"]]
+        high_risk_items = [item for item in risk_items 
+                          if item.get("level", "").lower() in ["높음", "심각", "high", "severe"]]
         
         # 중간 리스크 항목들 추출
-        medium_risk_items = [item for item in severity_levels 
-                            if item.get("level") == "중간"]
+        medium_risk_items = [item for item in risk_items 
+                            if item.get("level", "").lower() in ["중간", "medium"]]
         
         # 최대 3개의 심각한 리스크와 2개의 중간 리스크 선택
         selected_high = high_risk_items[:3]
         selected_medium = medium_risk_items[:2]
         
         selected_items = selected_high + selected_medium
+        
+        # 선택된 항목이 없으면 모든 항목 사용
+        if not selected_items and risk_items:
+            selected_items = risk_items[:5]
         
         # 벡터 DB에서 관련 모범 사례 검색
         best_practices = {}
@@ -62,20 +102,23 @@ def retrieve_best_practices(state: ImprovementSuggesterState) -> ImprovementSugg
             risk_item = item.get("risk_item", "")
             query = f"{category} {risk_item} best practices solutions"
             
-            docs = db_manager.search(
-                collection_name="ethics_guidelines",
-                query=query,
-                k=3
-            )
-            
-            item_id = item.get("item_id", "unknown")
-            best_practices[item_id] = {
-                "item": item,
-                "practices": [{
-                    "source": doc.metadata.get("file_name", "알 수 없음"),
-                    "content": doc.page_content
-                } for doc in docs]
-            }
+            try:
+                docs = db_manager.search(
+                    collection_name="ethics_guidelines",
+                    query=query,
+                    k=3
+                )
+                
+                item_id = item.get("item_id", "unknown")
+                best_practices[item_id] = {
+                    "item": item,
+                    "practices": [{
+                        "source": doc.metadata.get("file_name", "알 수 없음"),
+                        "content": doc.page_content
+                    } for doc in docs]
+                }
+            except Exception as e:
+                print(f"  ⚠️ 모범 사례 검색 중 오류: {str(e)}")
         
         return ImprovementSuggesterState(
             service_info=state.service_info,
@@ -254,58 +297,62 @@ def run_improvement_suggester(service_info: Dict, risk_assessment: Dict) -> Dict
     
     result = app.invoke(initial_state)
     
-    # 결과 출력
-    if result.error_message:
-        print(f"❌ 개선안 제안 실패: {result.error_message}")
+    # 결과 출력 - 딕셔너리 접근 방식으로 수정
+    if result.get("error_message"):
+        print(f"❌ 개선안 제안 실패: {result.get('error_message')}")
     else:
-        suggestions_count = len(result.improvement_suggestion.get("suggestions", []))
+        suggestions_count = len(result.get("improvement_suggestion", {}).get("suggestions", []))
         print(f"✅ 개선안 제안 완료: {suggestions_count}개 개선안 제안됨")
     
     # 개선 제안 결과 반환
-    return result.improvement_suggestion
+    return result.get("improvement_suggestion", {})
 
 if __name__ == "__main__":
-    # 테스트용 데이터
+    # Microsoft Azure AI Vision Face API 테스트
     test_service_info = {
-        "service_name": "AI 영상 분석 서비스",
-        "company": "테스트회사",
-        "service_category": "영상분석",
-        "features": ["얼굴 인식", "행동 분석", "감정 인식"],
-        "summary": "이 서비스는 CCTV 영상에서 얼굴을 인식하고 행동과 감정을 분석하는 AI 기반 서비스입니다."
+        "title": "Microsoft Azure AI Vision Face API",
+        "domain": "컴퓨터 비전 / 얼굴 인식",
+        "summary": "얼굴 감지, 식별, 감정 분석 등 얼굴 관련 컴퓨터 비전 기능을 제공하는 클라우드 API 서비스"
     }
     
     test_risk_assessment = {
         "doc_id": "test_risk_assessment",
         "risk_items": [
             {
-                "id": "privacy_1",
-                "category": "프라이버시",
-                "risk_item": "비식별화 처리 미흡",
+                "id": "bias_1",
+                "category": "편향성",
+                "risk_item": "인구통계학적 편향",
                 "severity_level": "높음"
             },
             {
-                "id": "bias_1",
-                "category": "편향성",
-                "risk_item": "특정 인종 인식률 불균형",
-                "severity_level": "중간"
+                "id": "privacy_1",
+                "category": "프라이버시",
+                "risk_item": "얼굴 데이터 수집 및 저장",
+                "severity_level": "심각"
             }
         ],
         "severity_levels": [
             {
-                "item_id": "privacy_1",
-                "category": "프라이버시",
-                "risk_item": "비식별화 처리 미흡",
-                "level": "높음",
-                "weighted_score": 15.5
-            },
-            {
                 "item_id": "bias_1",
                 "category": "편향성",
-                "risk_item": "특정 인종 인식률 불균형",
-                "level": "중간",
-                "weighted_score": 10.2
+                "risk_item": "인구통계학적 편향",
+                "level": "높음",
+                "weighted_score": 4.2
+            },
+            {
+                "item_id": "privacy_1",
+                "category": "프라이버시",
+                "risk_item": "얼굴 데이터 수집 및 저장",
+                "level": "심각",
+                "weighted_score": 4.8
             }
         ]
     }
     
-    run_improvement_suggester(test_service_info, test_risk_assessment)
+    # 에이전트 실행
+    result = run_improvement_suggester(test_service_info, test_risk_assessment)
+    if result.get("error_message"):
+        print(f"❌ 개선안 제안 실패: {result['error_message']}")
+    else:
+        print(f"✅ 개선안 제안 완료")
+        print(json.dumps(result.get("suggestions", []), ensure_ascii=False, indent=2))

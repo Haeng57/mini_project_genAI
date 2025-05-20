@@ -1,9 +1,12 @@
 import os
 import sys
 import json
+import subprocess  # 추가
 from typing import Dict, List, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
+import markdown
+import tempfile
 
 # 상위 디렉토리를 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -221,15 +224,44 @@ def report_finalizer(state: ReportState) -> ReportState:
             "content": report_content
         }
         
-        # 보고서 파일 저장
+        # 출력 디렉토리 생성
         os.makedirs("./outputs/reports", exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_filename = f"./outputs/reports/ethics_report_{timestamp}.md"
+        report_basename = f"ethics_report_{timestamp}"
         
-        with open(report_filename, "w", encoding="utf-8") as f:
+        # 마크다운 파일 저장
+        md_filename = f"./outputs/reports/{report_basename}.md"
+        with open(md_filename, "w", encoding="utf-8") as f:
             f.write(report_content)
             
-        print(f"✅ 최종 보고서 생성 완료: {report_filename}")
+        print(f"✅ 마크다운 보고서 생성 완료: {md_filename}")
+        
+        # PDF 파일 생성
+        try:
+            # 새로운 PDF 생성 방식으로 변경
+            pdf_filename = f"./outputs/reports/{report_basename}.pdf"
+            
+            # markdown-pdf 명령어 실행
+            try:
+                # subprocess를 사용하여 명령어 실행
+                command = ["markdown-pdf", md_filename, "-o", pdf_filename]
+                result = subprocess.run(command, check=True, capture_output=True, text=True)
+                
+                if os.path.exists(pdf_filename):
+                    print(f"✅ PDF 보고서 생성 완료: {pdf_filename}")
+                else:
+                    print("⚠️ PDF 파일이 생성되지 않았습니다.")
+                    
+            except subprocess.CalledProcessError as e:
+                print(f"⚠️ PDF 생성 중 오류 발생: {e}")
+                print(f"오류 출력: {e.stderr}")
+                
+            except FileNotFoundError:
+                print("⚠️ markdown-pdf 명령이 설치되어 있지 않습니다.")
+                print("npm install -g markdown-pdf 명령으로 설치해주세요.")
+
+        except Exception as e:
+            print(f"⚠️ PDF 생성 중 오류 발생: {str(e)}")
         
         return ReportState(
             service_info=state.service_info,
@@ -296,50 +328,90 @@ def run_report_agent(
     # 에이전트 실행
     result = app.invoke(initial_state.dict())
     
-    print(f"리포트 작성 완료: 상태 = {result.report_status}")
+    # 딕셔너리 접근 방식으로 수정
+    print(f"리포트 작성 완료: 상태 = {result['report_status']}")
     
-    # 결과 반환
+    # 결과 반환 - 딕셔너리 접근 방식으로 수정
     return {
-        "report_metadata": result.final_report.get("metadata", {}),
-        "report_content": result.final_report.get("content", ""),
-        "report_status": result.report_status,
-        "timestamp": result.timestamp,
-        "error_message": result.error_message if result.error_message else None
+        "report_metadata": result.get("final_report", {}).get("metadata", {}),
+        "report_content": result.get("final_report", {}).get("content", ""),
+        "report_status": result["report_status"],
+        "timestamp": result["timestamp"],
+        "error_message": result.get("error_message")
     }
 
 if __name__ == "__main__":
-    # 테스트용 데이터
+    # Microsoft Azure AI Vision Face API 테스트
     test_service_info = {
-        "title": "AI 이미지 생성 서비스",
-        "domain": "창작 도구",
-        "summary": "사용자가 텍스트 프롬프트를 입력하면 AI가 관련 이미지를 생성하는 서비스입니다.",
+        "title": "Microsoft Azure AI Vision Face API",
+        "domain": "컴퓨터 비전 / 얼굴 인식",
+        "summary": "얼굴 감지, 식별, 감정 분석 등 얼굴 관련 컴퓨터 비전 기능을 제공하는 클라우드 API 서비스",
         "features": [
-            {"name": "텍스트-이미지 변환", "description": "텍스트 설명을 바탕으로 이미지 생성"}
+            {"name": "얼굴 감지", "description": "이미지에서 얼굴 위치 및 특징점 감지"},
+            {"name": "얼굴 인식", "description": "개인 식별 및 유사도 분석"},
+            {"name": "감정 분석", "description": "표정 기반 감정 상태 추정"}
         ]
     }
     
     test_risk_assessments = [
         {
-            "category": "편향성",
-            "risk_level": "높음",
-            "risk_factors": [
+            "dimension": "편향성",
+            "risks": [
                 {
-                    "name": "성별 편향",
-                    "description": "특정 성별을 고정관념에 따라 묘사하는 이미지를 생성함"
+                    "title": "인구통계학적 편향",
+                    "severity": "높음",
+                    "description": "특정 인종, 성별, 연령대에 대한 인식 정확도 차이",
+                    "evidence": "다양한 연구에서 얼굴 인식 기술의 인구통계학적 편향 확인됨",
+                    "mitigation": "다양한 인구통계학적 데이터셋 사용 및 모델 재학습"
                 }
-            ]
+            ],
+            "overall_score": 4,
+            "rationale": "얼굴 인식 기술은 특정 인구통계학적 그룹에 대한 정확도 차이가 있음"
+        },
+        {
+            "dimension": "프라이버시",
+            "risks": [
+                {
+                    "title": "생체 데이터 수집",
+                    "severity": "심각",
+                    "description": "얼굴 데이터는 민감한 생체 정보로 분류됨",
+                    "evidence": "GDPR 등 개인정보보호법에서 생체 데이터 특별 보호",
+                    "mitigation": "명시적 동의 확보 및 데이터 암호화, 최소화"
+                }
+            ],
+            "overall_score": 5,
+            "rationale": "얼굴 데이터는 가장 민감한 생체 정보 중 하나로 높은 보호 수준 필요"
         }
     ]
     
     test_improvements = [
         {
             "category": "편향성",
-            "title": "생성 모델의 편향성 완화",
+            "title": "인구통계학적 편향 완화",
             "priority": "높음",
             "recommendations": [
                 {
-                    "action": "학습 데이터 다양화",
-                    "detail": "다양한 문화, 성별, 인종을 포함한 데이터셋으로 모델 재학습"
+                    "action": "학습 데이터셋 다양화",
+                    "detail": "다양한 인종, 성별, 연령대를 포괄하는 데이터셋 구축"
+                },
+                {
+                    "action": "정기적 편향성 감사",
+                    "detail": "분기별 인구통계학적 하위그룹별 정확도 측정"
+                }
+            ]
+        },
+        {
+            "category": "프라이버시",
+            "title": "생체 데이터 보호 강화",
+            "priority": "심각",
+            "recommendations": [
+                {
+                    "action": "동의 절차 개선",
+                    "detail": "명시적이고 구체적인 데이터 수집 및 사용 동의 절차"
+                },
+                {
+                    "action": "데이터 최소화",
+                    "detail": "필요한 최소한의 얼굴 특징만 저장하고 원본 즉시 삭제"
                 }
             ]
         }

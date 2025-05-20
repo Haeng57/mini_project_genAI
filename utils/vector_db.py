@@ -56,10 +56,21 @@ class VectorDBManager:
         # 저장 디렉토리 생성
         os.makedirs(self.persist_directory, exist_ok=True)
         
-        # 임베딩 함수 초기화 (사용자 지정 또는 기본값)
-        self.embedding_function = embedding_function or OpenAIEmbeddings(
-            openai_api_key=self.openai_api_key
-        )
+        # 사용자가 임베딩 함수를 제공했으면 그것을 사용, 아니면 HuggingFace 모델 사용
+        if embedding_function:
+            self.embedding_function = embedding_function
+        else:
+            try:
+                from langchain_huggingface import HuggingFaceEmbeddings
+                self.embedding_function = HuggingFaceEmbeddings(
+                    model_name="nlpai-lab/KURE-v1",
+                    encode_kwargs={'normalize_embeddings': True}
+                )
+            except:
+                # HuggingFace 모델을 불러올 수 없으면 OpenAI 임베딩 시도
+                self.embedding_function = OpenAIEmbeddings(
+                    openai_api_key=self.openai_api_key
+                )
         
         self._initialized = True
     
@@ -191,3 +202,20 @@ class VectorDBManager:
             collection.delete(ids=ids)
         elif filter is not None:
             collection.delete(where=filter)
+    
+    def collection_exists(self, collection_name: str) -> bool:
+        """
+        컬렉션이 존재하는지 확인
+        
+        Args:
+            collection_name: 확인할 컬렉션 이름
+        
+        Returns:
+            컬렉션 존재 여부 (True/False)
+        """
+        try:
+            # 컬렉션을 가져와서 확인
+            self.get_collection(collection_name)
+            return True
+        except Exception:
+            return False

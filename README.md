@@ -32,7 +32,7 @@
 | 가이드라인 임베딩 에이전트 | 국제적 윤리 가이드라인(UNESCO, OECD) 문서 임베딩 상태 확인 및 필요시 자동 임베딩 수행           |
 | 서비스 분석 에이전트       | AI 서비스 개요, 대상 기능, 주요 특징 등 정리 및 진단 범위 확정                                 |
 | 범위 검증 에이전트         | 서비스 분석 에이전트가 확정한 진단 범위를 사전 임베딩된 데이터와 대조하여 관련 정보 검증·수정  |
-| 윤리 리스크 진단 에이전트  | 편향성, 개인정보, 설명가능성 등 윤리 기준별 리스크 평가                                        |
+| 윤리 리스크 진단 에이전트  | 공정성, 프라이버시, 투명성, 책임성, 안전성 등 5대 윤리 차원별 리스크 평가 |
 | 개선안 제안 에이전트       | 리스크 완화 및 윤리성 강화 위한 구체적 개선 방향 도출                                          |
 | 리포트 작성 에이전트       | 진단 결과 및 권고사항 요약 보고서 자동 생성                                                    |
 
@@ -43,14 +43,35 @@
 | GuidelineEmbedder    | `need_embedding`                    | `embedded_files`, `embedding_status`   | 시스템: 당신은 문서 임베딩 전문가입니다.<br>지정된 윤리 가이드라인 문서(`{files}`)를 임베딩하고, 각 파일의 임베딩 상태를 보고하세요. |
 
 ### 윤리 리스크 진단 에이전트
+- 입력(State): `SERVICE_INFO.summary`, `SCOPE_UPDATE.modifications`, `ETHICS_GUIDELINE.guideline_list`  
+- 5대 윤리 차원 평가지침  
+  • 국제 윤리 가이드라인 기반 5가지 핵심 차원 정의  
+    1) 공정성(Fairness): 성별·연령·장애·지역·인종·종교 등 개인 특성에 따른 편향과 차별 최소화
+       - 1점: 편향 여부 평가 프로세스 전혀 없음
+       - 5점: 데이터·모델 평가 시 주요 집단 간 성능 차이 2% 미만
+    2) 프라이버시(Privacy): 개인정보 보호를 위한 사전 프라이버시 영향평가(PIA) 및 암호화·익명화 조치 적용
+       - 1점: PIA 미실시 및 비식별화 절차 부재
+       - 5점: 전수 PIA 수행 및 암호화·접근 통제 체계 완전 구축
+    3) 투명성(Transparency): 의사결정 근거와 처리 과정을 이해관계자가 확인할 수 있는 설명 가능성 보장
+       - 1점: 결과의 근거를 전혀 제공하지 않음
+       - 5점: 모델 로직·데이터 출처 문서화로 사용자 질의 응답 가능
+    4) 책임성(Accountability): 윤리적 문제에 대한 책임 부담 및 독립 감사·보고 체계 마련
+       - 1점: 책임 주체 및 절차 전무
+       - 5점: 정기적 윤리영향평가·외부 감사를 통한 거버넌스 완전 작동
+    5) 안전성(Safety & Robustness): 예기치 않은 오류·공격으로부터 안정성 유지를 위한 취약점 분석과 대응 절차 구축
+       - 1점: 취약점 진단·모니터링 전무
+       - 5점: 위협 시나리오 테스트, 실시간 모니터링, 자동 대응 체계 완비
+  • 1–5점 척도를 각 차원별로 구체적 기준과 함께 정의  
+  • 평가 기반: 데이터 훈련/테스트 과정, 모델 구현, 서비스 운영, 거버넌스 체계 전반 포함
+
 | 노드명               | 입력(State 필드)                                       | 출력(State 필드)                         | 상세 프롬프트 예시                                                                                                                                                                                                                                                   |
 |----------------------|--------------------------------------------------------|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| GuidelineRetriever   | `ETHICS_GUIDELINE.doc_id`                             | `guideline_summary`                      | 시스템: 당신은 AI 윤리 가이드라인 전문가입니다.<br>입력된 문서 ID(`{doc_id}`)에 해당하는 가이드라인에서 **편향성**, **프라이버시**, **투명성** 관련 조항을 우선순위(UNESCO > OECD > 기타)에 따라 요약하되, 조항 번호와 제목을 포함해 표로 작성하세요.      |
-| RiskItemExtractor    | `SERVICE_INFO.summary`, `SCOPE_UPDATE`                | `risk_items` (list)                      | 시스템: 당신은 AI 서비스 윤리 평가 전문가입니다.<br>서비스 요약과 검증된 범위 정보를 바탕으로 **편향성**, **프라이버시**, **설명가능성** 등 주요 윤리 항목별로 잠재 리스크 항목을 **5~7개**씩 추출하고, 간단한 설명을 덧붙여 리스트 형태로 출력하세요.            |
-| ScorePredictor       | `risk_item`, `guideline_summary`                      | `P, S, D, M, rationale`                  | 시스템: 다음 항목 `'{item}'`의 윤리 리스크를 평가하세요.<br>1) 발생 가능성(P), 2) 심각도(S), 3) 탐지 용이성(D), 4) 완화 난이도(M)을 각각 **1~5점**으로 산정하고, 각 점수에 대한 근거를 **2문장 이내**로 설명하세요.<br>적용 가이드라인 요약은 다음과 같습니다:<br>`{guideline_summary}` |
-| ScoreCalculator      | `P, S, D, M`                                           | `risk_scores.basic`, `risk_scores.weighted` | 시스템: 입력된 점수 P=`{P}`, S=`{S}`, D=`{D}`, M=`{M}`에 대해<br>1) 기본(basic): `basic = P × S`<br>2) 가중합(weighted): `weighted = 0.4×P + 0.4×S + 0.1×D + 0.1×M`<br>두 결과를 모두 반환하세요. |
-| SeverityClassifier   | `risk_scores.weighted`                                 | `severity_level`                         | 시스템: 가중합 점수 `{weighted}`에 따라 다음 기준으로 등급을 결정하세요.<br>1–6: `'낮음'`, 7–12: `'중간'`, 13–18: `'높음'`, 19–25: `'심각'`<br>결과를 `{"level":"등급","thresholds":[1–6,7–12,13–18,19–25]}` 형식의 JSON으로 출력하세요. |
-| LoopController       | `severity_levels`, `retry_count`              | `next_node`, `retry_count`               | 시스템: 1) 현재 `retry_count` < 3이고 `'높음'` 또는 `'심각'` 등급이 있으면 `next_node="ScorePredictor"`, `retry_count++`.<br>2) `retry_count` ≥ 3이거나 모든 항목 `'중간'` 이하일 경우 `next_node="ImprovementAgent"`로 이동하세요.<br>현재 등급 리스트: `{severity_list}`, 재진단 시도: `{retry_count}`회 |
+| GuidelineRetriever   | `ETHICS_GUIDELINE.doc_id`                             | `guideline_summary`                      | 시스템: 5대 윤리 차원(공정성, 프라이버시, 투명성, 책임성, 안전성)에 따라 주요 평가 기준을 요약하고, 각 차원의 1-5점 척도를 표로 작성하세요.                                                                                                                          |
+| RiskItemExtractor    | `SERVICE_INFO.summary`, `SCOPE_UPDATE.modifications`  | `risk_items` (list)                      | 시스템: 5대 윤리 차원 기준으로 **5~7개** 잠재 리스크 항목을 추출하고, 각 항목이 어느 차원(공정성/프라이버시/투명성/책임성/안전성)에 해당하는지 표시하세요.                                                                                                                   |
+| ScorePredictor       | `risk_items`, `guideline_summary`                      | `scores`, `rationale`                  | 시스템: 각 리스크 항목에 대해 해당 차원의 1~5점 척도에 따라 점수를 평가하고, 2문장 이내 근거를 작성하세요. 적용 가이드라인 요약: `{guideline_summary}`                                                                                                                              |
+| ScoreCalculator      | `scores`                                           | `risk_scores.basic`, `risk_scores.weighted` | 시스템: 기본(basic = 점수 평균)과 가중합(weighted = 공정성×0.25 + 프라이버시×0.25 + 투명성×0.2 + 책임성×0.15 + 안전성×0.15)을 계산하세요.                                                                                                                                                |
+| SeverityClassifier   | `risk_scores.weighted`                                 | `severity_levels`                        | 시스템: weighted 점수를 1–2:'낮음', 2.1–3:'중간', 3.1–4:'높음', 4.1–5:'심각'으로 분류하고, JSON `{"level":"등급","thresholds":[1–2,2.1–3,3.1–4,4.1–5]}` 형식으로 출력하세요.                                                                                                           |
+| LoopController       | `severity_levels`, `RISK_ASSESSMENT.retry_count`       | `next_node`, `retry_count`               | 시스템: `retry_count`<3이고 '높음'/'심각' 등급 존재 시 `next_node="ScorePredictor"`, 재진단; 그렇지 않으면 `next_node="ImprovementAgent"`로 이동하세요.                                                                                                                     |
 
 ## State
 - GUIDELINE_EMBEDDING: 윤리 가이드라인 임베딩 상태 정보
@@ -70,7 +91,7 @@
 - RISK_ASSESSMENT:  
   - doc_id: 리스크 평가 원문 ID  
   - risk_items: 항목별 리스크 리스트  
-  - scores: P, S, D, M, rationale  
+  - scores: 공정성, 프라이버시, 투명성, 책임성, 안전성, rationale  
   - risk_scores: basic, weighted  
   - severity_levels: `[{ "item_id":..., "level":"..." }, ...]`  
   - retry_count: 재진단 시도 횟수  
@@ -128,10 +149,11 @@ SUMMARY
 1. 서비스 개요 및 진단 목적
 2. 적용 윤리 가이드라인(출처, 주요 기준)
 3. 항목별 윤리 리스크 평가 결과
-  - 편향성: 위험 등급, 근거(메타데이터)
-  - 프라이버시: 위험 등급, 근거(메타데이터)
-  - 설명가능성: 위험 등급, 근거(메타데이터)
-  - (기타 항목)
+  - 공정성(Fairness): 위험 등급, 근거(메타데이터)
+  - 프라이버시(Privacy): 위험 등급, 근거(메타데이터)
+  - 투명성(Transparency): 위험 등급, 근거(메타데이터)
+  - 책임성(Accountability): 위험 등급, 근거(메타데이터)
+  - 안전성(Safety & Robustness): 위험 등급, 근거(메타데이터)
 4. 리스크별 개선 권고안
 5. 결론 및 향후 과제
 ```

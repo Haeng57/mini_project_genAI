@@ -4,6 +4,9 @@ import json
 from typing import Dict, List, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # 상위 디렉토리를 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -123,8 +126,20 @@ def scope_validator(state: ScopeValidatorState) -> ScopeValidatorState:
             timestamp=datetime.now().isoformat(),
             scope_updates=[{"update_type": "no_update", "reason": "가이드라인 참조 없음"}]
         )
+
+    # OpenAI API 키 가져오기
+    openai_api_key = os.getenv("OPENAI_API_KEY")
     
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    if not openai_api_key:
+        return ScopeValidatorState(
+            service_info=state.service_info,
+            guideline_references=state.guideline_references,
+            validation_status="failed",
+            error_message="OpenAI API 키가 설정되지 않았습니다.",
+            timestamp=datetime.now().isoformat()
+        )
+    
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=openai_api_key)
     
     # 서비스 정보와 가이드라인 텍스트 준비
     service_info_text = json.dumps(state.service_info, ensure_ascii=False, indent=2)
@@ -157,7 +172,7 @@ def scope_validator(state: ScopeValidatorState) -> ScopeValidatorState:
     4. 진단 범위를 JSON 형식으로 반환 (기존 구조 유지, 필요시 필드 추가)
     5. 업데이트 내용 목록을 JSON 배열 형식으로 작성
     
-    각 업데이트는 {"update_type": "added"|"modified"|"removed", "field": "필드명", "reason": "사유"}
+    각 업데이트는 {{"update_type": "added" 또는 "modified" 또는 "removed", "field": "필드명", "reason": "사유"}}
     
     출력 형식:
     {{"validated_scope": [수정된 서비스 정보], "scope_updates": [업데이트 내역 목록]}}
@@ -232,32 +247,43 @@ def run_scope_validator(service_info: Dict[str, Any]) -> Dict[str, Any]:
     graph = create_scope_validator()
     app = graph.compile()
     
-    # 초기 상태 설정
+    # 초기 상태 설정 - model_dump() 사용하여 경고 제거
     initial_state = ScopeValidatorState(service_info=service_info)
     
     # 에이전트 실행
-    result = app.invoke(initial_state.dict())
-    
-    print(f"범위 검증 완료: 상태 = {result.validation_status}")
-    
-    # 결과 반환
-    return {
-        "validated_scope": result.validated_scope,
-        "scope_updates": result.scope_updates,
-        "validation_status": result.validation_status,
-        "timestamp": result.timestamp,
-        "error_message": result.error_message if result.error_message else None
-    }
+    try:
+        result = app.invoke(initial_state.model_dump())  # dict() 대신 model_dump() 사용
+        
+        print(f"범위 검증 완료: 상태 = {result.get('validation_status', '알 수 없음')}")
+        
+        # 결과 반환 - 딕셔너리 접근 방식 사용
+        return {
+            "validated_scope": result.get("validated_scope", {}),
+            "scope_updates": result.get("scope_updates", []),
+            "validation_status": result.get("validation_status", ""),
+            "timestamp": result.get("timestamp", datetime.now().isoformat()),
+            "error_message": result.get("error_message") if result.get("error_message") else None
+        }
+    except Exception as e:
+        error_message = f"범위 검증 에이전트 실행 중 오류 발생: {str(e)}"
+        print(f"❌ {error_message}")
+        return {
+            "validation_status": "failed",
+            "error_message": error_message,
+            "timestamp": datetime.now().isoformat()
+        }
 
 if __name__ == "__main__":
-    # 테스트용 서비스 정보
+    # Microsoft Azure AI Vision Face API 테스트
     test_service_info = {
-        "title": "AI 이미지 생성 서비스",
-        "domain": "창작 도구",
-        "summary": "사용자가 텍스트 프롬프트를 입력하면 AI가 관련 이미지를 생성하는 서비스입니다.",
+        "title": "Microsoft Azure AI Vision Face API",
+        "domain": "컴퓨터 비전 / 얼굴 인식",
+        "summary": "얼굴 감지, 식별, 감정 분석 등 얼굴 관련 컴퓨터 비전 기능을 제공하는 클라우드 API 서비스",
         "features": [
-            {"name": "텍스트-이미지 변환", "description": "텍스트 설명을 바탕으로 이미지 생성"},
-            {"name": "이미지 편집", "description": "생성된 이미지 스타일 변경 및 편집"}
+            {"name": "얼굴 감지", "description": "이미지에서 얼굴 위치 및 특징점 감지"},
+            {"name": "얼굴 인식", "description": "개인 식별 및 유사도 분석"},
+            {"name": "감정 분석", "description": "표정 기반 감정 상태 추정"},
+            {"name": "속성 분석", "description": "나이, 성별 등 인구통계학적 속성 추정"}
         ]
     }
     

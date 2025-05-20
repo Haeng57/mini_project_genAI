@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langgraph.graph import StateGraph, END
-
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from utils.pdf_embedder import embed_pdf_documents
 from utils.vector_db import VectorDBManager
@@ -119,8 +119,8 @@ def guideline_embedder(state: EmbeddingAgentState) -> EmbeddingAgentState:
             specific_files=need_embedding,
             use_huggingface=True,
             embedding_model="nlpai-lab/KURE-v1",
-            chunk_size=1000,  # 청크 크기를 충분히 크게 설정
-            chunk_overlap=100  # 오버랩도 적절히 설정
+            chunk_size=500,  # 청크 크기를 충분히 크게 설정
+            chunk_overlap=50  # 오버랩도 적절히 설정
         )
         
         # 체크포인트 저장
@@ -203,23 +203,29 @@ def run_embedding_agent() -> Dict:
     graph = create_embedding_agent()
     app = graph.compile()
     
+    # 임베딩 시도할 파일 기록
+    attempted_files = []
+    
     # 에이전트 실행
     result = app.invoke({})
     
+    # 결과 값을 딕셔너리로 추출
+    embedding_status = result.get("embedding_status", "")
+    
     # 결과 출력
-    if result.embedding_status == "completed":
-        print(f"✅ 임베딩 성공: {', '.join(result.need_embedding)}")
-    elif result.embedding_status == "skipped":
+    if embedding_status == "completed":
+        print(f"✅ 임베딩 성공: {', '.join(result.get('embedded_files', []))}")
+    elif embedding_status == "skipped":
         print("🔄 임베딩 생략: 모든 파일이 이미 임베딩되어 있습니다")
     else:
-        print(f"❌ 임베딩 실패: {result.error_message}")
+        print(f"❌ 임베딩 실패: {result.get('error_message', '')}")
     
     # 현재 임베딩 상태 요약 반환
     return {
-        "embedded_files": result.embedded_files,
-        "embedding_status": result.embedding_status,
-        "timestamp": result.timestamp,
-        "error_message": result.error_message if result.error_message else None
+        "embedded_files": result.get("embedded_files", []),
+        "embedding_status": embedding_status,
+        "timestamp": result.get("timestamp", ""),
+        "error_message": result.get("error_message", None)
     }
 
 if __name__ == "__main__":
